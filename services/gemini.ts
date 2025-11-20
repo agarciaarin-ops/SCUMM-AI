@@ -303,10 +303,12 @@ export const generateSceneImage = async (
 
   const sanitizedPrompt = sanitizeVisualPrompt(visualPrompt);
 
+  // Force 16:9 Wide Aspect Ratio in the prompt
   const fullPrompt = `
     ${style}. Retro video game screenshot. 
     Scene: ${sanitizedPrompt}. 
     Key Elements visible: ${cleanElements}.
+    Wide Screen 16:9 Cinematic visuals.
     NO TEXT. NO UI. NO LABELS. NO SPEECH BUBBLES.
     Scale: Realistic relative to character.
     Diegetic elements only.
@@ -328,6 +330,9 @@ export const generateSceneImage = async (
         contents: { parts },
         config: {
             responseModalities: [Modality.IMAGE],
+            // Try to request aspect ratio if supported by the endpoint shim
+            // @ts-ignore
+            aspectRatio: '16:9' 
         }
       }), 2); // Retry twice max for images
 
@@ -345,7 +350,7 @@ export const generateSceneImage = async (
     // Attempt 2: Retry without reference (sometimes ref image causes safety blocks) OR simpler prompt
     try {
         // Simplify prompt: just the style and the first sentence of visual prompt
-        const simplePrompt = `${style}. ${sanitizedPrompt.split('.')[0]}. NO TEXT.`;
+        const simplePrompt = `${style}. ${sanitizedPrompt.split('.')[0]}. NO TEXT. Wide 16:9.`;
         return await generate(simplePrompt);
     } catch (err2) {
         console.error("Image Gen completely failed", err2);
