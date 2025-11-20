@@ -8,7 +8,8 @@ const ai = new GoogleGenAI({ apiKey: API_KEY });
 // HYBRID ARCHITECTURE CONFIGURATION
 const MODEL_INIT = "gemini-3-pro-preview"; // "Big Brain" for world creation
 const MODEL_LOOP = "gemini-2.5-flash";     // "Fast Brain" for gameplay actions
-const MODEL_IMAGE = "gemini-2.5-flash-image"; // "Visual Cortex"
+const MODEL_IMAGE = "gemini-2.5-flash-image"; // "Visual Cortex" for Editing
+const MODEL_IMAGE_HQ = "imagen-3.0-generate-001"; // "Visual Cortex HQ" for New Scenes
 
 // Helper to strip data:image prefix
 const cleanBase64 = (dataUrl: string) => dataUrl.replace(/^data:image\/(png|jpeg|jpg);base64,/, '');
@@ -237,10 +238,16 @@ export const generateGameResponse = async (
     
     REGLAS:
     - Respuestas narrativas BREVES (Max 3 frases).
-    - GESTIÓN DE INVENTARIO CRÍTICA: El array 'inventory' en tu respuesta JSON sustituye al anterior. Debes incluir TODOS los objetos antiguos (${currentInvList}) a menos que el jugador los pierda explícitamente en esta acción. Si recoge algo nuevo, añádelo a la lista. NO devuelvas una lista vacía si ya tenía objetos.
+    - GESTIÓN DE INVENTARIO CRÍTICA: 
+      1. El array 'inventory' en tu respuesta JSON sustituye al anterior. 
+      2. Debes incluir TODOS los objetos antiguos (${currentInvList}) a menos que el jugador los pierda o consuma explícitamente.
+      3. Si recoge algo nuevo, añádelo a la lista.
+    - GESTIÓN VISUAL (Visual Prompt & Key Elements):
+      1. Si el jugador COGE (Pick up) un objeto visible, DEBES ELIMINARLO de 'visualPrompt' y de 'keyElements'. Describe el lugar como vacío donde estaba el objeto.
+      2. Si el jugador TIRA/DEJA un objeto, añádelo a la descripción visual.
     - Nombres de inventario: NATURALES y CORTOS.
     - SI VUELVE A UNA UBICACIÓN DE LA LISTA DE CACHE, USA EL MISMO NOMBRE EXACTO.
-    - VISUALCHANGED: TRUE solo si hay cambios físicos visibles (ej: abrir puerta, romper cosa). FALSE si solo habla/mira.
+    - VISUALCHANGED: TRUE solo si hay cambios físicos visibles (coger objeto, abrir puerta, moverse). FALSE si solo habla/mira.
   `;
 
   try {
@@ -303,7 +310,9 @@ export const generateSceneImage = async (
 
   const sanitizedPrompt = sanitizeVisualPrompt(visualPrompt);
 
-  // Standard 1:1 prompt (Nano Banana native) without forcing Wide Screen
+  // Standard Prompt for both Generation and Editing
+  // We DO NOT force aspect ratio here to avoid burned-in bars.
+  // The model naturally does 1:1 or adapts.
   const fullPrompt = `
     ${style}. Retro video game screenshot. 
     Scene: ${sanitizedPrompt}. 
@@ -313,7 +322,7 @@ export const generateSceneImage = async (
     Diegetic elements only.
   `;
 
-  const generate = async (prompt: string, refImage?: string) => {
+  const generate = async (prompt: string, refImage?: string, modelOverride?: string) => {
       const parts: any[] = [{ text: prompt }];
       if (refImage) {
           parts.push({
@@ -324,12 +333,17 @@ export const generateSceneImage = async (
           });
       }
       
+      // If referencing an image, we MUST use Flash Image (Nano Banana) because Imagen 3.0 doesn't do Img2Img edit yet.
+      // If NO reference (New Scene), use Imagen 3.0 for better quality.
+      const activeModel = refImage ? MODEL_IMAGE : MODEL_IMAGE_HQ; 
+
       const response = await callWithRetry(() => ai.models.generateContent({
-        model: MODEL_IMAGE,
+        model: activeModel,
         contents: { parts },
         config: {
             responseModalities: [Modality.IMAGE],
-            // Removing aspect ratio to let model generate its native 1:1 square
+            // For Imagen 3.0, we could ask for 16:9, but to be safe from "bars", let's stick to native.
+            ...(activeModel === MODEL_IMAGE_HQ ? { aspectRatio: '16:9' } : {}) 
         }
       }), 2); // Retry twice max for images
 
@@ -339,16 +353,17 @@ export const generateSceneImage = async (
   };
 
   try {
-    // Attempt 1: Full fidelity with reference (if provided)
+    // Attempt 1: Try preferred method (HQ for new, Flash for edit)
     return await generate(fullPrompt, referenceImageBase64);
   } catch (error) {
     console.warn("Image Gen attempt 1 failed. Retrying simpler prompt...", error);
     
-    // Attempt 2: Retry without reference (sometimes ref image causes safety blocks) OR simpler prompt
+    // Attempt 2: Fallback logic
     try {
         // Simplify prompt
         const simplePrompt = `${style}. ${sanitizedPrompt.split('.')[0]}. NO TEXT.`;
-        return await generate(simplePrompt);
+        // If edit failed, try generating fresh without reference
+        return await generate(simplePrompt, undefined, MODEL_IMAGE); 
     } catch (err2) {
         console.error("Image Gen completely failed", err2);
         // Fallback to a placeholder
