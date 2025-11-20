@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { GameState, GameSettings, InventoryItem } from './types';
 import { generateGameResponse, generateSceneImage, generateInitialGameWorld } from './services/gemini';
@@ -7,6 +8,7 @@ import { Inventory } from './components/Inventory';
 import { ActionButtons } from './components/ActionButtons';
 
 // Default presets
+const DEFAULT_WORLD = "Bilbao Realista con toques Mágicos";
 const DEFAULT_LOCATION = "Bilbao, Casco Viejo";
 const DEFAULT_STYLE = "Pixel Art Retro Monkey Island Style";
 const DEFAULT_OBJECTIVE = "Encontrar la receta secreta del Kalimotxo legendario";
@@ -72,6 +74,7 @@ export default function App() {
   }, [showLog]);
 
   // Menu Form State
+  const [inputWorld, setInputWorld] = useState(DEFAULT_WORLD);
   const [inputLocation, setInputLocation] = useState(DEFAULT_LOCATION);
   const [inputStyle, setInputStyle] = useState(DEFAULT_STYLE);
   const [inputObjective, setInputObjective] = useState(DEFAULT_OBJECTIVE);
@@ -80,6 +83,7 @@ export default function App() {
   // Game State
   const [gameState, setGameState] = useState<GameState>({
     settings: {
+        world: DEFAULT_WORLD,
         startLocation: DEFAULT_LOCATION,
         artStyle: DEFAULT_STYLE,
         objective: DEFAULT_OBJECTIVE,
@@ -104,6 +108,7 @@ export default function App() {
     setInitStatus("CONECTANDO CON GEMINI 3 PRO...");
     
     const newSettings: GameSettings = {
+        world: inputWorld,
         startLocation: inputLocation,
         artStyle: inputStyle,
         objective: inputObjective,
@@ -111,10 +116,10 @@ export default function App() {
     };
 
     try {
-      setInitStatus("GENERANDO NARRATIVA...");
+      setInitStatus("DISEÑANDO TRAMA Y MISTERIO...");
       const initialWorld = await generateInitialGameWorld(newSettings);
       
-      setInitStatus("RENDERIZANDO MUNDO (NANO BANANA)...");
+      setInitStatus("RENDERIZANDO ESCENA (NANO BANANA)...");
       const imageBase64 = await generateSceneImage(
           initialWorld.visualPrompt, 
           newSettings.artStyle, 
@@ -243,7 +248,7 @@ export default function App() {
       setGameState(prev => ({ 
         ...prev, 
         loadingStatus: null, 
-        narrative: "Error de conexión o alucinación de la IA. Inténtalo de nuevo." 
+        narrative: "El sistema se ha sobrecargado momentáneamente. Intenta otra acción." 
       }));
     }
   }, [gameState]);
@@ -272,6 +277,10 @@ export default function App() {
            <p className="text-xl md:text-2xl text-cyan-400 mb-8 tracking-widest">CONFIGURADOR DE AVENTURA</p>
 
            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative z-10 text-left mb-8">
+             <div className="md:col-span-2 flex flex-col">
+               <label className="text-lg text-green-400 mb-1">AMBIENTACIÓN / MUNDO (ej: Star Wars, Bilbao, One Piece)</label>
+               <input type="text" value={inputWorld} onChange={(e) => setInputWorld(e.target.value)} className="bg-black border-2 border-green-600 text-white p-2 text-xl focus:outline-none focus:border-yellow-400"/>
+             </div>
              <div className="flex flex-col">
                <label className="text-lg text-green-400 mb-1">UBICACIÓN DE INICIO</label>
                <input type="text" value={inputLocation} onChange={(e) => setInputLocation(e.target.value)} className="bg-black border-2 border-green-600 text-white p-2 text-xl focus:outline-none focus:border-yellow-400"/>
@@ -281,7 +290,7 @@ export default function App() {
                <input type="text" value={inputStyle} onChange={(e) => setInputStyle(e.target.value)} className="bg-black border-2 border-green-600 text-white p-2 text-xl focus:outline-none focus:border-yellow-400"/>
              </div>
              <div className="flex flex-col">
-               <label className="text-lg text-green-400 mb-1">OBJETIVO / TEMA</label>
+               <label className="text-lg text-green-400 mb-1">OBJETIVO / MISIÓN</label>
                <input type="text" value={inputObjective} onChange={(e) => setInputObjective(e.target.value)} className="bg-black border-2 border-green-600 text-white p-2 text-xl focus:outline-none focus:border-yellow-400"/>
              </div>
              <div className="flex flex-col">
@@ -390,7 +399,7 @@ export default function App() {
       
       <footer className="mt-4 text-gray-600 text-sm text-center">
         Powered by Gemini 3.0 Pro & Imagen (Nano Banana) <br/> 
-        Mode: {gameState.settings.tone}
+        World: {gameState.settings.world} | Mode: {gameState.settings.tone}
       </footer>
     </div>
   );

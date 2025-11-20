@@ -1,4 +1,6 @@
+
 export interface GameSettings {
+  world: string; // New: The universe context (e.g., "Star Wars", "Monkey Island")
   startLocation: string;
   artStyle: string;
   objective: string;

@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { GameResponse, GameState, GameSettings } from "../types";
 
@@ -85,21 +86,29 @@ const gameSchema = {
 
 export const generateInitialGameWorld = async (settings: GameSettings): Promise<GameResponse> => {
   const systemInstruction = `
-    Eres el motor de juego de una aventura gráfica clásica (estilo SCUMM).
-    Configuración: "${settings.startLocation}", Objetivo: "${settings.objective}", Tono: "${settings.tone}".
+    Eres el ARQUITECTO MAESTRO de una aventura gráfica compleja.
     
-    Misión:
-    1. Sitúa al jugador en la escena inicial.
-    2. IMPORTANTE: Mantén la narrativa CORTA e INTRODUCTORIA (Max 80 palabras).
-    3. Inventario: Genera 2-3 objetos iniciales con nombres naturales.
-    4. visualChanged debe ser TRUE en la inicialización.
+    CONFIGURACIÓN:
+    - Universo/Mundo: "${settings.world}"
+    - Ubicación Inicial: "${settings.startLocation}"
+    - Misión Final: "${settings.objective}"
+    - Tono: "${settings.tone}"
+    
+    TU TAREA (Pensamiento Profundo):
+    1. DISEÑA EN TU MENTE el misterio completo. ¿Cuál es el final? ¿Qué puzzles llevan allí?
+    2. ESTABLECE LA ESCENA INICIAL para que contenga pistas reales y lógicas hacia esa solución. Nada de generación aleatoria sin sentido.
+    3. GENERA EL INVENTARIO inicial con 2-3 objetos que sean coherentes con el Mundo (${settings.world}) y útiles para el primer puzzle.
+    
+    SALIDA:
+    - Narrativa: Intro inmersiva que establece el conflicto.
+    - VisualPrompt: Describe el estilo visual acorde al Mundo (${settings.world}).
   `;
 
   try {
-    // Using GEMINI 3 PRO for high-quality initialization
+    // Using GEMINI 3 PRO for high-quality initialization (The "Big Brain" phase)
     const response = await callWithRetry(() => ai.models.generateContent({
       model: MODEL_INIT,
-      contents: "Inicializa la aventura.",
+      contents: "Inicializa la aventura con un diseño de narrativa profundo.",
       config: {
         systemInstruction: systemInstruction,
         responseMimeType: "application/json",
@@ -137,13 +146,19 @@ export const generateGameResponse = async (
 
   const systemInstruction = `
     Eres el motor lógico (Gemini 2.5 Flash) de una aventura gráfica. RÁPIDO y COHERENTE.
-    Contexto: ${settings.tone}. Ubicación: ${currentState.location}.
+    
+    CONTEXTO DEL JUEGO:
+    - Mundo: ${settings.world} (Respeta las reglas, tecnología y magia de este universo).
+    - Tono: ${settings.tone}.
+    - Ubicación Actual: ${currentState.location}.
+    - Misión: ${settings.objective}.
     
     REGLAS:
     - Respuestas narrativas BREVES (Max 3 frases).
+    - Mantén la coherencia con el Mundo definido.
     - NUNCA cortes el JSON.
     - Inventario: Nombres naturales, sin códigos.
-    - visualChanged: CRUCIAL. Ponlo en FALSE si el jugador solo "mira", "habla", "examina" o intenta algo que falla. Ponlo en TRUE solo si cambia de habitación, coge algo visible, o modifica el entorno físicamente.
+    - visualChanged: TRUE solo si cambia la escena visualmente (movimiento, coger item visible). FALSE si es dialogo o mirar.
   `;
 
   const parts: any[] = [];
@@ -168,7 +183,7 @@ export const generateGameResponse = async (
   });
 
   try {
-    // Using GEMINI 2.5 FLASH for speed in the game loop
+    // Using GEMINI 2.5 FLASH for speed in the game loop (The "Fast Brain" phase)
     const response = await callWithRetry(() => ai.models.generateContent({
       model: MODEL_LOOP,
       contents: { parts },
