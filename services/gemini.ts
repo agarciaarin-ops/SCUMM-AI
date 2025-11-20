@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { GameResponse, GameState, GameSettings } from "../types";
 
@@ -13,13 +12,14 @@ const MODEL_IMAGE = "gemini-2.5-flash-image"; // "Visual Cortex"
 // Helper to strip data:image prefix
 const cleanBase64 = (dataUrl: string) => dataUrl.replace(/^data:image\/(png|jpeg|jpg);base64,/, '');
 
-// Helper to clean JSON output from Markdown fences
+// Helper to clean JSON output using substring extraction (Most Robust)
 const cleanJsonOutput = (text: string) => {
   let cleaned = text.trim();
-  if (cleaned.startsWith('```json')) {
-    cleaned = cleaned.replace(/^```json\n?/, '').replace(/\n?```$/, '');
-  } else if (cleaned.startsWith('```')) {
-    cleaned = cleaned.replace(/^```\n?/, '').replace(/\n?```$/, '');
+  const firstBrace = cleaned.indexOf('{');
+  const lastBrace = cleaned.lastIndexOf('}');
+  
+  if (firstBrace !== -1 && lastBrace !== -1) {
+    return cleaned.substring(firstBrace, lastBrace + 1);
   }
   return cleaned;
 };
@@ -56,7 +56,7 @@ const tryParseJSON = (jsonString: string) => {
 };
 
 // Helper: Retry Logic for 503/500 Errors
-const callWithRetry = async (fn: () => Promise<any>, retries = 3, delay = 1000): Promise<any> => {
+const callWithRetry = async (fn: () => Promise<any>, retries = 3, delay = 500): Promise<any> => {
     try {
         return await fn();
     } catch (error: any) {
@@ -83,7 +83,7 @@ const sanitizeVisualPrompt = (text: string) => {
 const gameSchema = {
   type: Type.OBJECT,
   properties: {
-    narrative: { type: Type.STRING, description: "La respuesta narrativa del juego. MÁXIMO 100 palabras. Conciso y directo." },
+    narrative: { type: Type.STRING, description: "La respuesta narrativa del juego. MÁXIMO 50 palabras. Conciso y directo." },
     location: { type: Type.STRING, description: "El nombre de la ubicación actual." },
     visualPrompt: { type: Type.STRING, description: "Descripción visual física de la escena para generar la imagen." },
     inventory: { 
@@ -125,64 +125,80 @@ export const generateInitialGameWorld = async (settings: GameSettings): Promise<
     - Misión Final: "${settings.objective}"
     - Tono: "${settings.tone}"
     
-    TU TAREA (Pensamiento Profundo):
-    1. DISEÑA EN TU MENTE el misterio completo.
+    TU TAREA:
+    1. DISEÑA el misterio completo.
     2. ESTABLECE LA ESCENA INICIAL con pistas lógicas.
     3. GENERA EL INVENTARIO inicial con MÁXIMO 3 objetos coherentes.
     
-    RESTRICCIONES CRÍTICAS PARA EVITAR ERRORES:
-    - NARRATIVA: No escribas una novela. Máximo 4 frases potentes.
-    - INVENTARIO: Máximo 3 objetos. NOMBRES HUMANOS (ej: "Llave Vieja", NO "Llave_Vieja_V1").
-    - VISUAL PROMPT: Enfocado en descripción física para Pixel Art.
-    - SALIDA: DEBE ser JSON válido y completo.
-    - ANTI-BUCLE: NUNCA repitas palabras como "FINAL", "FIX", "V1", "V2" en los nombres.
+    RESTRICCIONES CRÍTICAS:
+    - NARRATIVA: MÁXIMO 3 frases. No escribas novelas.
+    - INVENTARIO: Nombres HUMANOS (ej: "Llave Vieja"). PROHIBIDO usar sufijos "_V1", "FIX", "ERROR".
+    - VISUAL PROMPT: Describe solo lo físico para Pixel Art.
+    - SALIDA: JSON VÁLIDO.
   `;
 
-  try {
-    // Using GEMINI 3 PRO for high-quality initialization (The "Big Brain" phase)
-    const response = await callWithRetry(() => ai.models.generateContent({
-      model: MODEL_INIT,
-      contents: "Inicializa la aventura. Genera JSON válido y completo.",
-      config: {
-        systemInstruction: systemInstruction,
-        responseMimeType: "application/json",
-        responseSchema: gameSchema,
-        maxOutputTokens: 20000, 
-        thinkingConfig: { thinkingBudget: 1024 }
-      }
-    }));
+  const generateWithModel = async (model: string) => {
+      const response = await callWithRetry(() => ai.models.generateContent({
+        model: model,
+        contents: "Inicializa la aventura. Genera JSON válido y completo.",
+        config: {
+          systemInstruction: systemInstruction,
+          responseMimeType: "application/json",
+          responseSchema: gameSchema,
+          maxOutputTokens: 4096, // Reduced to prevent massive runaway outputs
+        }
+      }));
+      return response;
+  };
 
+  try {
+    // ATTEMPT 1: Try High-Intelligence Model (Gemini 3 Pro)
+    console.log("Initializing with Big Brain (Gemini 3 Pro)...");
+    const response = await generateWithModel(MODEL_INIT);
     const jsonText = cleanJsonOutput(response.text || "{}");
     const parsed = tryParseJSON(jsonText);
-    
-    if (parsed) {
-        return {
-            narrative: parsed.narrative || "Error generando historia.",
-            location: parsed.location || "Desconocido",
-            visualPrompt: parsed.visualPrompt || "Error visual.",
-            inventory: parsed.inventory || [],
-            keyElements: parsed.keyElements || [],
-            availableExits: parsed.availableExits || [],
-            visualChanged: true
-        };
-    } else {
-        console.error("JSON Parse Failed (Init): Raw text too damaged.");
-        // Fallback
-        return {
-            narrative: "El sistema se ha reiniciado tras una inestabilidad cuántica. Estás en el punto de inicio.",
-            location: settings.startLocation,
-            visualPrompt: `A pixel art scene of ${settings.startLocation}`,
-            inventory: [],
-            keyElements: [],
-            availableExits: [],
-            visualChanged: true
-        };
-    }
+
+    if (parsed) return mapParsedResponse(parsed, settings);
+
+    throw new Error("Gemini 3 Pro returned invalid JSON");
+
   } catch (error) {
-    console.error("Init Error:", error);
-    throw error;
+    console.warn("Gemini 3 Pro Init Failed, Falling back to Flash...", error);
+    
+    // ATTEMPT 2: Fallback to Fast Model (Gemini 2.5 Flash)
+    try {
+        const response = await generateWithModel(MODEL_LOOP);
+        const jsonText = cleanJsonOutput(response.text || "{}");
+        const parsed = tryParseJSON(jsonText);
+        
+        if (parsed) return mapParsedResponse(parsed, settings);
+        
+    } catch (flashError) {
+        console.error("Critical Init Failure (Both Models):", flashError);
+    }
+
+    // ULTIMATE FALLBACK
+    return {
+        narrative: "El sistema se ha reiniciado tras una inestabilidad cuántica. Estás en el punto de inicio.",
+        location: settings.startLocation,
+        visualPrompt: `A pixel art scene of ${settings.startLocation} in ${settings.artStyle} style.`,
+        inventory: [],
+        keyElements: [],
+        availableExits: [],
+        visualChanged: true
+    };
   }
 };
+
+const mapParsedResponse = (parsed: any, settings: GameSettings): GameResponse => ({
+    narrative: parsed.narrative || "Comienza la aventura...",
+    location: parsed.location || settings.startLocation,
+    visualPrompt: parsed.visualPrompt || `Scene of ${settings.startLocation}`,
+    inventory: parsed.inventory || [],
+    keyElements: parsed.keyElements || [],
+    availableExits: parsed.availableExits || [],
+    visualChanged: true
+});
 
 export const generateGameResponse = async (
   userAction: string,
@@ -191,174 +207,135 @@ export const generateGameResponse = async (
 ): Promise<GameResponse> => {
   
   const { settings } = currentState;
+  const knownLocs = Object.keys(currentState.knownLocations).join(', ');
 
   const systemInstruction = `
     Eres el motor lógico (Gemini 2.5 Flash) de una aventura gráfica. RÁPIDO y COHERENTE.
     
     CONTEXTO DEL JUEGO:
-    - Mundo: ${settings.world} (Respeta las reglas, tecnología y magia de este universo).
+    - Mundo: ${settings.world}.
     - Tono: ${settings.tone}.
     - Ubicación Actual: ${currentState.location}.
     - Misión: ${settings.objective}.
+    - UBICACIONES YA VISITADAS (CACHE): [${knownLocs}]
     
     REGLAS:
     - Respuestas narrativas BREVES (Max 3 frases).
-    - Mantén la coherencia con el Mundo definido.
-    - NUNCA cortes el JSON.
-    - Inventario: Nombres naturales, sin códigos ni sufijos técnicos.
-    - visualChanged: TRUE solo si cambia la escena visualmente.
+    - Inventario: Nombres naturales.
+    - SI VUELVE A UNA UBICACIÓN DE LA LISTA DE CACHE, USA EL MISMO NOMBRE EXACTO.
+    - VISUALCHANGED: TRUE solo si hay cambios físicos visibles (ej: abrir puerta, romper cosa). FALSE si solo habla/mira.
   `;
 
-  const parts: any[] = [];
-  
-  // 1. Add Image Context if available (Flash sees the world)
-  if (currentImageBase64) {
-    parts.push({
-      inlineData: {
-        data: cleanBase64(currentImageBase64),
-        mimeType: 'image/png'
-      }
-    });
-  }
-
-  // 2. Add Text Prompt
-  const inventoryContext = (currentState.inventory || []).map(i => i.name).join(', ');
-  
-  parts.push({
-    text: `Acción del jugador: "${userAction}". 
-    Inventario actual: [${inventoryContext}]. 
-    Historia reciente: ${currentState.history.slice(-2).map(h => h.content).join(' ')}`
-  });
-
   try {
-    // Using GEMINI 2.5 FLASH for speed in the game loop (The "Fast Brain" phase)
+    const parts: any[] = [{ text: `ACCIÓN DEL JUGADOR: "${userAction}"` }];
+    
+    // Multimodal context: Only add image if available
+    if (currentImageBase64) {
+        parts.unshift({
+            inlineData: {
+                mimeType: "image/png",
+                data: cleanBase64(currentImageBase64)
+            }
+        });
+    }
+
     const response = await callWithRetry(() => ai.models.generateContent({
-      model: MODEL_LOOP,
+      model: MODEL_LOOP, // Using Flash for Game Loop (Speed)
       contents: { parts },
       config: {
         systemInstruction: systemInstruction,
         responseMimeType: "application/json",
         responseSchema: gameSchema,
-        maxOutputTokens: 8192, 
       }
     }));
 
     const jsonText = cleanJsonOutput(response.text || "{}");
     const parsed = tryParseJSON(jsonText);
 
-    if (!parsed) {
-         // Fallback if JSON is totally broken
-         throw new Error("Invalid JSON received from AI loop");
-    }
+    if (parsed) return mapParsedResponse(parsed, settings);
 
+    // Soft Error (keep game running)
     return {
-        narrative: parsed.narrative || "...",
-        location: parsed.location || currentState.location,
-        visualPrompt: parsed.visualPrompt || currentState.visualDescription,
-        inventory: parsed.inventory || currentState.inventory,
-        keyElements: parsed.keyElements || [],
-        availableExits: parsed.availableExits || [],
-        visualChanged: parsed.visualChanged ?? true 
+        narrative: "La realidad parpadea. Intenta esa acción de nuevo.",
+        location: currentState.location,
+        visualPrompt: currentState.visualDescription,
+        inventory: currentState.inventory,
+        keyElements: [],
+        availableExits: currentState.availableExits,
+        visualChanged: false
     };
 
   } catch (error) {
-    console.error("Game Response Error:", error);
-    // Fallback response to keep game alive
-    return {
-      narrative: "Una interferencia en la realidad te impide realizar eso ahora mismo. (Error de IA)",
-      location: currentState.location,
-      visualPrompt: currentState.visualDescription,
-      inventory: currentState.inventory,
-      keyElements: [],
-      availableExits: currentState.availableExits,
-      visualChanged: false
-    };
+    console.error("Game Loop Error:", error);
+    throw error;
   }
 };
 
 export const generateSceneImage = async (
-  prompt: string, 
-  artStyle: string, 
-  keyElements: string[] = [],
-  referenceImage?: string
+    visualPrompt: string, 
+    style: string, 
+    keyElements: string[] = [],
+    referenceImageBase64?: string
 ): Promise<string> => {
-  try {
-    // 1. Sanitize the Visual Prompt to avoid Safety Blocks (e.g. Alcohol references)
-    const safePrompt = sanitizeVisualPrompt(prompt);
+  
+  // Clean key elements to remove text artifacts like "(NPC)" or "-> arrow"
+  const cleanElements = keyElements
+    .map(el => el.replace(/\(.*\)/g, '').replace(/\[.*\]/g, '').trim())
+    .filter(el => el.length > 0)
+    .join(", ");
 
-    // 2. Sanitize key elements to remove text instructions like "(NPC)", "[Broken]"
-    const safeElements = (keyElements || [])
-        .map(k => k.replace(/\s*\(.*?\)\s*/g, '').replace(/\s*\[.*?\]\s*/g, '').trim())
-        .filter(k => k.length > 0);
+  const sanitizedPrompt = sanitizeVisualPrompt(visualPrompt);
 
-    const elementsString = safeElements.length > 0 ? `VISIBLE ELEMENTS: ${safeElements.join(', ')}` : '';
-    
-    // Enhanced Prompt for cleaner visuals
-    const enhancedPrompt = `
-      ${artStyle}. Pixel art videogame screenshot. Point and click adventure.
-      Scene: ${safePrompt}. 
-      ${elementsString}.
-      
-      CRITICAL RULES:
-      - SCALE: Objects must be in correct scale relative to the environment (no giant birds or items).
-      - TEXT: NO floating text. NO labels. NO names above heads. Only diegetic text allowed (like neon signs on buildings).
-      - UI: NO user interface elements, NO arrows, NO cursors, NO speech bubbles.
-      - Perspective: Wide angle, scene view.
-    `.trim();
+  const fullPrompt = `
+    ${style}. Retro video game screenshot. 
+    Scene: ${sanitizedPrompt}. 
+    Key Elements visible: ${cleanElements}.
+    NO TEXT. NO UI. NO LABELS. NO SPEECH BUBBLES.
+    Scale: Realistic relative to character.
+    Diegetic elements only.
+  `;
 
-    const makeImageCall = async (includeReference: boolean) => {
-        const parts: any[] = [];
-
-        if (includeReference && referenceImage) {
-            parts.push({
-                inlineData: {
-                    data: cleanBase64(referenceImage),
-                    mimeType: 'image/png'
-                }
-            });
-            parts.push({ text: `Edit this image to match description: ${enhancedPrompt}` });
-        } else {
-            parts.push({ text: enhancedPrompt });
-        }
-
-        // Using GEMINI 2.5 FLASH IMAGE (Nano Banana)
-        const response = await callWithRetry(() => ai.models.generateContent({
-            model: MODEL_IMAGE,
-            contents: { parts },
-            config: {
-            responseModalities: [Modality.IMAGE],
-            },
-        }));
-        
-        const part = response.candidates?.[0]?.content?.parts?.[0];
-        if (part?.inlineData?.data) {
-            return `data:image/png;base64,${part.inlineData.data}`;
-        }
-        throw new Error("No image data received in response");
-    };
-
-    // Attempt generation with Fallback/Recovery logic
-    try {
-        if (referenceImage) {
-            try {
-                return await makeImageCall(true);
-            } catch (editError) {
-                console.warn("Image Edit failed. Retrying with Fresh Generation...", editError);
-                return await makeImageCall(false);
+  const generate = async (prompt: string, refImage?: string) => {
+      const parts: any[] = [{ text: prompt }];
+      if (refImage) {
+          parts.push({
+            inlineData: {
+              mimeType: "image/png",
+              data: cleanBase64(refImage)
             }
-        } else {
-            return await makeImageCall(false);
+          });
+      }
+      
+      const response = await callWithRetry(() => ai.models.generateContent({
+        model: MODEL_IMAGE,
+        contents: { parts },
+        config: {
+            responseModalities: [Modality.IMAGE],
         }
-    } catch (genError) {
-        console.error("Image Generation completely failed:", genError);
-        // Fallback: Return a "Static/No Signal" image to prevent game crash
-        // A small 1x1 dark grey pixel to keep the UI stable
-        return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
-    }
+      }), 2); // Retry twice max for images
 
+      const base64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (!base64) throw new Error("No image data");
+      return `data:image/png;base64,${base64}`;
+  };
+
+  try {
+    // Attempt 1: Full fidelity with reference (if provided)
+    return await generate(fullPrompt, referenceImageBase64);
   } catch (error) {
-    console.error("Image Logic Error:", error);
-    // Ultimate fallback
-    return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    console.warn("Image Gen attempt 1 failed. Retrying simpler prompt...", error);
+    
+    // Attempt 2: Retry without reference (sometimes ref image causes safety blocks) OR simpler prompt
+    try {
+        // Simplify prompt: just the style and the first sentence of visual prompt
+        const simplePrompt = `${style}. ${sanitizedPrompt.split('.')[0]}. NO TEXT.`;
+        return await generate(simplePrompt);
+    } catch (err2) {
+        console.error("Image Gen completely failed", err2);
+        // Fallback to a placeholder or previous image if possible, but for now return empty to handle in UI
+        // Returning a static placeholder base64 (1x1 transparent or a static asset pattern)
+        // Use a simple colored placeholder for "Signal Lost" effect
+        return ""; 
+    }
   }
 };

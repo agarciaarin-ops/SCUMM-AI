@@ -51,7 +51,33 @@ const sanitizeInventory = (items: InventoryItem[]): InventoryItem[] => {
 };
 
 // Map Key Normalization to improve cache hits (ignoring case/spaces)
-const normalizeLocKey = (location: string) => location.trim().toLowerCase();
+const normalizeLocKey = (location: string) => location.trim().toLowerCase().replace(/[.,]$/, '');
+
+// Fuzzy Location Matching to handle AI inconsistencies (e.g. "Bar" vs "Interior Bar")
+const findCachedLocationKey = (targetLoc: string, knownKeys: string[]): string | null => {
+    const normTarget = normalizeLocKey(targetLoc);
+    
+    // 1. Exact Match
+    if (knownKeys.includes(normTarget)) return normTarget;
+
+    // 2. Fuzzy Match (Target contains Key OR Key contains Target)
+    // We sort known keys by length (descending) to match the most specific one first.
+    // e.g. If known is "Bar Manolo" and target is "Bar", we might not want to match unless strict.
+    // But if known is "Bar Manolo" and target is "Interior del Bar Manolo", we want to match.
+    const sortedKeys = [...knownKeys].sort((a, b) => b.length - a.length);
+
+    for (const key of sortedKeys) {
+        // Ignore very short keys to prevent false positives (e.g. "A" matching "Area")
+        if (key.length < 4) continue;
+
+        if (normTarget.includes(key) || key.includes(normTarget)) {
+            console.log(`[Cache] Fuzzy Match: '${targetLoc}' matched with '${key}'`);
+            return key;
+        }
+    }
+
+    return null;
+};
 
 export default function App() {
   // UI State
@@ -176,16 +202,21 @@ export default function App() {
       // Visual Logic with Persistence & Optimization
       let newImageUrl = gameState.imageUrl;
       const hasChangedLocation = response.location !== gameState.location;
-      const locationKey = normalizeLocKey(response.location || "unknown");
+      
+      // CACHE LOGIC: Check if the new location (or a similar name) exists in memory
+      const responseLocKey = normalizeLocKey(response.location || "unknown");
+      const knownKeys = Object.keys(gameState.knownLocations);
+      const cachedKey = findCachedLocationKey(responseLocKey, knownKeys);
+      
       const hasVisualChange = response.visualChanged === true;
       
       // Optimization: Only regenerate if location changes OR explicit visual change requested
       if (hasChangedLocation) {
-         // CASE A: Location Changed
-         if (gameState.knownLocations[locationKey]) {
+         if (cachedKey && gameState.knownLocations[cachedKey]) {
             // CACHE HIT: Load from memory
+            console.log(`Restoring cached image for ${cachedKey}`);
             setGameState(prev => ({ ...prev, loadingStatus: "CARGANDO UBICACIÓN..." }));
-            newImageUrl = gameState.knownLocations[locationKey].imageUrl;
+            newImageUrl = gameState.knownLocations[cachedKey].imageUrl;
          } else {
              // NEW LOCATION: Generate
              setGameState(prev => ({ ...prev, loadingStatus: "GENERANDO ESCENA..." }));
@@ -221,9 +252,21 @@ export default function App() {
         const newHistory = [...prev.history, { role: 'model' as const, content: response.narrative }];
         if (newHistory.length > 20) newHistory.splice(0, 5); // Keep buffer managed
         
+        // Safety check for sanitizing inventory to avoid crashes
+        let safeInventory: InventoryItem[] = [];
+        if (response.inventory && Array.isArray(response.inventory)) {
+           safeInventory = sanitizeInventory(response.inventory);
+        } else {
+           // Fallback to previous inventory if response is malformed
+           safeInventory = prev.inventory;
+        }
+        
+        // Use the cachedKey if we found one, otherwise use the new key
+        const finalLocKey = cachedKey || responseLocKey;
+
         const updatedKnownLocations = {
             ...prev.knownLocations,
-            [locationKey]: {
+            [finalLocKey]: {
                 imageUrl: newImageUrl || '',
                 visualPrompt: response.visualPrompt
             }
@@ -233,7 +276,7 @@ export default function App() {
           ...prev,
           location: response.location || prev.location,
           narrative: response.narrative,
-          inventory: sanitizeInventory(response.inventory || prev.inventory),
+          inventory: safeInventory,
           availableExits: response.availableExits || [],
           visualDescription: response.visualPrompt,
           imageUrl: newImageUrl,
