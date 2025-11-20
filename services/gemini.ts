@@ -52,7 +52,7 @@ const sanitizeVisualPrompt = (text: string) => {
 const gameSchema = {
   type: Type.OBJECT,
   properties: {
-    narrative: { type: Type.STRING, description: "La respuesta narrativa del juego. MÁXIMO 80 palabras. Conciso y directo." },
+    narrative: { type: Type.STRING, description: "La respuesta narrativa del juego. MÁXIMO 100 palabras. Conciso y directo." },
     location: { type: Type.STRING, description: "El nombre de la ubicación actual." },
     visualPrompt: { type: Type.STRING, description: "Descripción visual física de la escena para generar la imagen." },
     inventory: { 
@@ -95,41 +95,57 @@ export const generateInitialGameWorld = async (settings: GameSettings): Promise<
     - Tono: "${settings.tone}"
     
     TU TAREA (Pensamiento Profundo):
-    1. DISEÑA EN TU MENTE el misterio completo. ¿Cuál es el final? ¿Qué puzzles llevan allí?
-    2. ESTABLECE LA ESCENA INICIAL para que contenga pistas reales y lógicas hacia esa solución. Nada de generación aleatoria sin sentido.
-    3. GENERA EL INVENTARIO inicial con 2-3 objetos que sean coherentes con el Mundo (${settings.world}) y útiles para el primer puzzle.
+    1. DISEÑA EN TU MENTE el misterio completo.
+    2. ESTABLECE LA ESCENA INICIAL con pistas lógicas.
+    3. GENERA EL INVENTARIO inicial con MÁXIMO 3 objetos coherentes.
     
-    SALIDA:
-    - Narrativa: Intro inmersiva que establece el conflicto.
-    - VisualPrompt: Describe el estilo visual acorde al Mundo (${settings.world}).
+    RESTRICCIONES CRÍTICAS PARA EVITAR ERRORES DE JSON:
+    - NARRATIVA: No escribas una novela. Máximo 4 frases potentes.
+    - INVENTARIO: Máximo 3 objetos. Descripciones cortas (1 frase).
+    - VISUAL PROMPT: Enfocado en descripción física para Pixel Art.
+    - SALIDA: DEBE ser JSON válido y completo. No cortes el texto.
   `;
 
   try {
     // Using GEMINI 3 PRO for high-quality initialization (The "Big Brain" phase)
     const response = await callWithRetry(() => ai.models.generateContent({
       model: MODEL_INIT,
-      contents: "Inicializa la aventura con un diseño de narrativa profundo.",
+      contents: "Inicializa la aventura. Genera JSON válido y completo.",
       config: {
         systemInstruction: systemInstruction,
         responseMimeType: "application/json",
         responseSchema: gameSchema,
-        maxOutputTokens: 8192, 
+        maxOutputTokens: 20000, // Increased to prevent JSON truncation
         thinkingConfig: { thinkingBudget: 1024 } 
       }
     }));
 
     const jsonText = cleanJsonOutput(response.text || "{}");
-    const parsed = JSON.parse(jsonText);
     
-    return {
-        narrative: parsed.narrative || "Error generando historia.",
-        location: parsed.location || "Desconocido",
-        visualPrompt: parsed.visualPrompt || "Error visual.",
-        inventory: parsed.inventory || [],
-        keyElements: parsed.keyElements || [],
-        availableExits: parsed.availableExits || [],
-        visualChanged: true
-    };
+    try {
+        const parsed = JSON.parse(jsonText);
+        return {
+            narrative: parsed.narrative || "Error generando historia.",
+            location: parsed.location || "Desconocido",
+            visualPrompt: parsed.visualPrompt || "Error visual.",
+            inventory: parsed.inventory || [],
+            keyElements: parsed.keyElements || [],
+            availableExits: parsed.availableExits || [],
+            visualChanged: true
+        };
+    } catch (parseError) {
+        console.error("JSON Parse Error:", parseError, "Raw Text:", jsonText);
+        // Fallback if JSON is malformed/truncated
+        return {
+            narrative: "El sistema se ha reiniciado tras un error crítico de datos. Estás en el punto de inicio.",
+            location: settings.startLocation,
+            visualPrompt: `A pixel art scene of ${settings.startLocation}`,
+            inventory: [],
+            keyElements: [],
+            availableExits: [],
+            visualChanged: true
+        };
+    }
   } catch (error) {
     console.error("Init Error:", error);
     throw error;
