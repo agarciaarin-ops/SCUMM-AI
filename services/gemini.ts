@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { GameResponse, GameState, GameSettings } from "../types";
 
@@ -145,7 +146,7 @@ export const generateInitialGameWorld = async (settings: GameSettings): Promise<
           systemInstruction: systemInstruction,
           responseMimeType: "application/json",
           responseSchema: gameSchema,
-          maxOutputTokens: 4096, // Reduced to prevent massive runaway outputs
+          maxOutputTokens: 4096, 
         }
       }));
       return response;
@@ -158,7 +159,11 @@ export const generateInitialGameWorld = async (settings: GameSettings): Promise<
     const jsonText = cleanJsonOutput(response.text || "{}");
     const parsed = tryParseJSON(jsonText);
 
-    if (parsed) return mapParsedResponse(parsed, settings);
+    if (parsed) {
+        const mapped = mapParsedResponse(parsed, settings);
+        mapped.modelUsed = "Gemini 3.0 Pro"; // EXPLICIT SUCCESS TAG
+        return mapped;
+    }
 
     throw new Error("Gemini 3 Pro returned invalid JSON");
 
@@ -171,7 +176,11 @@ export const generateInitialGameWorld = async (settings: GameSettings): Promise<
         const jsonText = cleanJsonOutput(response.text || "{}");
         const parsed = tryParseJSON(jsonText);
         
-        if (parsed) return mapParsedResponse(parsed, settings);
+        if (parsed) {
+            const mapped = mapParsedResponse(parsed, settings);
+            mapped.modelUsed = "Gemini 2.5 Flash (Fallback)"; // EXPLICIT FALLBACK TAG
+            return mapped;
+        }
         
     } catch (flashError) {
         console.error("Critical Init Failure (Both Models):", flashError);
@@ -185,7 +194,8 @@ export const generateInitialGameWorld = async (settings: GameSettings): Promise<
         inventory: [],
         keyElements: [],
         availableExits: [],
-        visualChanged: true
+        visualChanged: true,
+        modelUsed: "System Recovery"
     };
   }
 };

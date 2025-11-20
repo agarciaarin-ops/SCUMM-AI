@@ -123,7 +123,8 @@ export default function App() {
     imageUrl: null,
     loadingStatus: null,
     history: [],
-    knownLocations: {}
+    knownLocations: {},
+    modelUsed: 'Unknown'
   });
 
   // Start Game Logic
@@ -167,7 +168,8 @@ export default function App() {
                 imageUrl: imageBase64,
                 visualPrompt: initialWorld.visualPrompt
             }
-        }
+        },
+        modelUsed: initialWorld.modelUsed
       });
       
       setIsGameStarted(true);
@@ -441,8 +443,9 @@ export default function App() {
       </div>
       
       <footer className="mt-4 text-gray-600 text-sm text-center">
-        Powered by Gemini 3.0 Pro & Imagen (Nano Banana) <br/> 
-        World: {gameState.settings.world} | Mode: {gameState.settings.tone}
+        World Gen: <span className={gameState.modelUsed?.includes("Pro") ? "text-green-500" : "text-yellow-500"}>{gameState.modelUsed || "Initializing..."}</span> <br/>
+        Powered by Gemini 3.0 Pro (Brain) & Gemini 2.5 Flash (Speed) & Nano Banana (Vision) <br/> 
+        World: {gameState.settings.world}
       </footer>
     </div>
   );

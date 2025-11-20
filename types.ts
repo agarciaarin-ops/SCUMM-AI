@@ -28,6 +28,7 @@ export interface GameState {
   loadingStatus: string | null;
   history: { role: 'user' | 'model'; content: string }[];
   knownLocations: Record<string, VisitedLocation>;
+  modelUsed?: string; // New: Tracks which model generated the initial world
 }
 
 export interface GameResponse {
@@ -38,6 +39,7 @@ export interface GameResponse {
   keyElements: string[];
   availableExits: string[]; // New: Extracted exits
   visualChanged?: boolean; // New: Explicit flag to control image regeneration
+  modelUsed?: string; // New: Reporting back the model name
 }
 
 export type ActionType = 'Ir a' | 'Mirar' | 'Coger' | 'Hablar con' | 'Usar';
