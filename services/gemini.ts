@@ -303,12 +303,11 @@ export const generateSceneImage = async (
 
   const sanitizedPrompt = sanitizeVisualPrompt(visualPrompt);
 
-  // Force 16:9 Wide Aspect Ratio in the prompt
+  // Standard 1:1 prompt (Nano Banana native) without forcing Wide Screen
   const fullPrompt = `
     ${style}. Retro video game screenshot. 
     Scene: ${sanitizedPrompt}. 
     Key Elements visible: ${cleanElements}.
-    Wide Screen 16:9 Cinematic visuals.
     NO TEXT. NO UI. NO LABELS. NO SPEECH BUBBLES.
     Scale: Realistic relative to character.
     Diegetic elements only.
@@ -330,9 +329,7 @@ export const generateSceneImage = async (
         contents: { parts },
         config: {
             responseModalities: [Modality.IMAGE],
-            // Try to request aspect ratio if supported by the endpoint shim
-            // @ts-ignore
-            aspectRatio: '16:9' 
+            // Removing aspect ratio to let model generate its native 1:1 square
         }
       }), 2); // Retry twice max for images
 
@@ -349,14 +346,12 @@ export const generateSceneImage = async (
     
     // Attempt 2: Retry without reference (sometimes ref image causes safety blocks) OR simpler prompt
     try {
-        // Simplify prompt: just the style and the first sentence of visual prompt
-        const simplePrompt = `${style}. ${sanitizedPrompt.split('.')[0]}. NO TEXT. Wide 16:9.`;
+        // Simplify prompt
+        const simplePrompt = `${style}. ${sanitizedPrompt.split('.')[0]}. NO TEXT.`;
         return await generate(simplePrompt);
     } catch (err2) {
         console.error("Image Gen completely failed", err2);
-        // Fallback to a placeholder or previous image if possible, but for now return empty to handle in UI
-        // Returning a static placeholder base64 (1x1 transparent or a static asset pattern)
-        // Use a simple colored placeholder for "Signal Lost" effect
+        // Fallback to a placeholder
         return ""; 
     }
   }
