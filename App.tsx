@@ -20,6 +20,11 @@ const VERBS = ['Ir a', 'Mirar', 'Coger', 'Hablar con', 'Usar'];
 const sanitizeInventory = (items: InventoryItem[]): InventoryItem[] => {
     if (!items) return [];
     return items.map(item => {
+        // Safety check for corrupt objects
+        if (!item || !item.name) {
+             return { name: "Objeto Glitcheado", description: "Un error en la matriz. Mejor no tocarlo." };
+        }
+
         // 1. Remove underscores, technical suffixes, and error flags
         let cleanName = item.name
             .replace(/_/g, ' ') // Replace underscores with spaces

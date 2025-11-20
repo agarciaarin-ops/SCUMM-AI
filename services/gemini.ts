@@ -93,7 +93,7 @@ const gameSchema = {
         type: Type.OBJECT,
         properties: {
             name: { type: Type.STRING, description: "Nombre NATURAL y CORTO (ej: 'Mapa', 'Botella'). MÁXIMO 3 palabras. SIN sufijos técnicos, SIN guiones bajos, SIN versiones."},
-            description: { type: Type.STRING, description: "Descripción ingeniosa del objeto. MÁXIMO 2 frases."}
+            description: { type: Type.STRING, description: "Descripción ingeniosa estilo enciclopedia de aventura gráfica."}
         }
       },
       description: "La lista completa y actualizada de objetos en el inventario."
@@ -218,6 +218,11 @@ export const generateGameResponse = async (
   
   const { settings } = currentState;
   const knownLocs = Object.keys(currentState.knownLocations).join(', ');
+  
+  // Build current inventory list string for context
+  const currentInvList = currentState.inventory.length > 0 
+      ? currentState.inventory.map(i => `"${i.name}"`).join(', ') 
+      : "Ninguno";
 
   const systemInstruction = `
     Eres el motor lógico (Gemini 2.5 Flash) de una aventura gráfica. RÁPIDO y COHERENTE.
@@ -227,11 +232,13 @@ export const generateGameResponse = async (
     - Tono: ${settings.tone}.
     - Ubicación Actual: ${currentState.location}.
     - Misión: ${settings.objective}.
+    - INVENTARIO ACTUAL DEL JUGADOR: [${currentInvList}]
     - UBICACIONES YA VISITADAS (CACHE): [${knownLocs}]
     
     REGLAS:
     - Respuestas narrativas BREVES (Max 3 frases).
-    - Inventario: Nombres naturales.
+    - GESTIÓN DE INVENTARIO CRÍTICA: El array 'inventory' en tu respuesta JSON sustituye al anterior. Debes incluir TODOS los objetos antiguos (${currentInvList}) a menos que el jugador los pierda explícitamente en esta acción. Si recoge algo nuevo, añádelo a la lista. NO devuelvas una lista vacía si ya tenía objetos.
+    - Nombres de inventario: NATURALES y CORTOS.
     - SI VUELVE A UNA UBICACIÓN DE LA LISTA DE CACHE, USA EL MISMO NOMBRE EXACTO.
     - VISUALCHANGED: TRUE solo si hay cambios físicos visibles (ej: abrir puerta, romper cosa). FALSE si solo habla/mira.
   `;
@@ -269,7 +276,7 @@ export const generateGameResponse = async (
         narrative: "La realidad parpadea. Intenta esa acción de nuevo.",
         location: currentState.location,
         visualPrompt: currentState.visualDescription,
-        inventory: currentState.inventory,
+        inventory: currentState.inventory, // Keep existing inventory on error
         keyElements: [],
         availableExits: currentState.availableExits,
         visualChanged: false
