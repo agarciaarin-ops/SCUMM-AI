@@ -24,6 +24,37 @@ const cleanJsonOutput = (text: string) => {
   return cleaned;
 };
 
+// Helper: Robust JSON Parser with Auto-Repair for truncated responses
+const tryParseJSON = (jsonString: string) => {
+  try {
+    return JSON.parse(jsonString);
+  } catch (e) {
+    // Attempt 1: Check if it's just missing the closing brace
+    try {
+        return JSON.parse(jsonString + '}');
+    } catch (e2) {
+        // Attempt 2: Check if it's missing a closing array and brace
+        try {
+            return JSON.parse(jsonString + ']}');
+        } catch (e3) {
+             // Attempt 3: If it ends with a quote (truncated string value), close quote and brace
+             if (jsonString.trim().endsWith('"')) {
+                 try {
+                    return JSON.parse(jsonString + '}');
+                 } catch(e4) {}
+             } else {
+                 // Ends in middle of string? Close quote then brace
+                 try {
+                    return JSON.parse(jsonString + '"}');
+                 } catch(e5) {}
+             }
+        }
+    }
+    console.warn("JSON Auto-Repair failed. Original text length:", jsonString.length);
+    return null;
+  }
+};
+
 // Helper: Retry Logic for 503/500 Errors
 const callWithRetry = async (fn: () => Promise<any>, retries = 3, delay = 1000): Promise<any> => {
     try {
@@ -60,7 +91,7 @@ const gameSchema = {
       items: { 
         type: Type.OBJECT,
         properties: {
-            name: { type: Type.STRING, description: "Nombre NATURAL y CORTO (ej: 'Mapa', 'Botella'). MÁXIMO 3 palabras. Sin códigos."},
+            name: { type: Type.STRING, description: "Nombre NATURAL y CORTO (ej: 'Mapa', 'Botella'). MÁXIMO 3 palabras. SIN sufijos técnicos, SIN guiones bajos, SIN versiones."},
             description: { type: Type.STRING, description: "Descripción ingeniosa del objeto. MÁXIMO 2 frases."}
         }
       },
@@ -99,11 +130,12 @@ export const generateInitialGameWorld = async (settings: GameSettings): Promise<
     2. ESTABLECE LA ESCENA INICIAL con pistas lógicas.
     3. GENERA EL INVENTARIO inicial con MÁXIMO 3 objetos coherentes.
     
-    RESTRICCIONES CRÍTICAS PARA EVITAR ERRORES DE JSON:
+    RESTRICCIONES CRÍTICAS PARA EVITAR ERRORES:
     - NARRATIVA: No escribas una novela. Máximo 4 frases potentes.
-    - INVENTARIO: Máximo 3 objetos. Descripciones cortas (1 frase).
+    - INVENTARIO: Máximo 3 objetos. NOMBRES HUMANOS (ej: "Llave Vieja", NO "Llave_Vieja_V1").
     - VISUAL PROMPT: Enfocado en descripción física para Pixel Art.
-    - SALIDA: DEBE ser JSON válido y completo. No cortes el texto.
+    - SALIDA: DEBE ser JSON válido y completo.
+    - ANTI-BUCLE: NUNCA repitas palabras como "FINAL", "FIX", "V1", "V2" en los nombres.
   `;
 
   try {
@@ -115,15 +147,15 @@ export const generateInitialGameWorld = async (settings: GameSettings): Promise<
         systemInstruction: systemInstruction,
         responseMimeType: "application/json",
         responseSchema: gameSchema,
-        maxOutputTokens: 20000, // Increased to prevent JSON truncation
-        thinkingConfig: { thinkingBudget: 1024 } 
+        maxOutputTokens: 20000, 
+        thinkingConfig: { thinkingBudget: 1024 }
       }
     }));
 
     const jsonText = cleanJsonOutput(response.text || "{}");
+    const parsed = tryParseJSON(jsonText);
     
-    try {
-        const parsed = JSON.parse(jsonText);
+    if (parsed) {
         return {
             narrative: parsed.narrative || "Error generando historia.",
             location: parsed.location || "Desconocido",
@@ -133,11 +165,11 @@ export const generateInitialGameWorld = async (settings: GameSettings): Promise<
             availableExits: parsed.availableExits || [],
             visualChanged: true
         };
-    } catch (parseError) {
-        console.error("JSON Parse Error:", parseError, "Raw Text:", jsonText);
-        // Fallback if JSON is malformed/truncated
+    } else {
+        console.error("JSON Parse Failed (Init): Raw text too damaged.");
+        // Fallback
         return {
-            narrative: "El sistema se ha reiniciado tras un error crítico de datos. Estás en el punto de inicio.",
+            narrative: "El sistema se ha reiniciado tras una inestabilidad cuántica. Estás en el punto de inicio.",
             location: settings.startLocation,
             visualPrompt: `A pixel art scene of ${settings.startLocation}`,
             inventory: [],
@@ -173,8 +205,8 @@ export const generateGameResponse = async (
     - Respuestas narrativas BREVES (Max 3 frases).
     - Mantén la coherencia con el Mundo definido.
     - NUNCA cortes el JSON.
-    - Inventario: Nombres naturales, sin códigos.
-    - visualChanged: TRUE solo si cambia la escena visualmente (movimiento, coger item visible). FALSE si es dialogo o mirar.
+    - Inventario: Nombres naturales, sin códigos ni sufijos técnicos.
+    - visualChanged: TRUE solo si cambia la escena visualmente.
   `;
 
   const parts: any[] = [];
@@ -207,12 +239,17 @@ export const generateGameResponse = async (
         systemInstruction: systemInstruction,
         responseMimeType: "application/json",
         responseSchema: gameSchema,
-        maxOutputTokens: 8192, // Ensure plenty of room for JSON
+        maxOutputTokens: 8192, 
       }
     }));
 
     const jsonText = cleanJsonOutput(response.text || "{}");
-    const parsed = JSON.parse(jsonText);
+    const parsed = tryParseJSON(jsonText);
+
+    if (!parsed) {
+         // Fallback if JSON is totally broken
+         throw new Error("Invalid JSON received from AI loop");
+    }
 
     return {
         narrative: parsed.narrative || "...",
@@ -221,14 +258,14 @@ export const generateGameResponse = async (
         inventory: parsed.inventory || currentState.inventory,
         keyElements: parsed.keyElements || [],
         availableExits: parsed.availableExits || [],
-        visualChanged: parsed.visualChanged ?? true // Default to true if undefined to be safe, but prompt encourages false
+        visualChanged: parsed.visualChanged ?? true 
     };
 
   } catch (error) {
     console.error("Game Response Error:", error);
     // Fallback response to keep game alive
     return {
-      narrative: "El sistema se ha sobrecargado momentáneamente. Intenta otra acción.",
+      narrative: "Una interferencia en la realidad te impide realizar eso ahora mismo. (Error de IA)",
       location: currentState.location,
       visualPrompt: currentState.visualDescription,
       inventory: currentState.inventory,

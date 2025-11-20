@@ -130,14 +130,14 @@ export default function App() {
         settings: newSettings,
         location: initialWorld.location || "Desconocido",
         narrative: initialWorld.narrative || "",
-        inventory: sanitizeInventory(initialWorld.inventory),
+        inventory: sanitizeInventory(initialWorld.inventory || []),
         availableExits: initialWorld.availableExits || [],
         visualDescription: initialWorld.visualPrompt,
         imageUrl: imageBase64,
         loadingStatus: null,
-        history: [{ role: 'model', content: initialWorld.narrative }],
+        history: [{ role: 'model' as const, content: initialWorld.narrative }],
         knownLocations: {
-            [normalizeLocKey(initialWorld.location)]: {
+            [normalizeLocKey(initialWorld.location || "start")]: {
                 imageUrl: imageBase64,
                 visualPrompt: initialWorld.visualPrompt
             }
@@ -161,7 +161,7 @@ export default function App() {
     setGameState(prev => ({ 
       ...prev, 
       loadingStatus: "ANALIZANDO ACCIÓN...",
-      history: [...prev.history, { role: 'user', content: action }] 
+      history: [...prev.history, { role: 'user' as const, content: action }] 
     }));
     
     setUserInput("");
@@ -176,7 +176,7 @@ export default function App() {
       // Visual Logic with Persistence & Optimization
       let newImageUrl = gameState.imageUrl;
       const hasChangedLocation = response.location !== gameState.location;
-      const locationKey = normalizeLocKey(response.location);
+      const locationKey = normalizeLocKey(response.location || "unknown");
       const hasVisualChange = response.visualChanged === true;
       
       // Optimization: Only regenerate if location changes OR explicit visual change requested
@@ -218,7 +218,7 @@ export default function App() {
       }
 
       setGameState(prev => {
-        const newHistory = [...prev.history, { role: 'model', content: response.narrative }];
+        const newHistory = [...prev.history, { role: 'model' as const, content: response.narrative }];
         if (newHistory.length > 20) newHistory.splice(0, 5); // Keep buffer managed
         
         const updatedKnownLocations = {
@@ -231,9 +231,9 @@ export default function App() {
 
         return {
           ...prev,
-          location: response.location,
+          location: response.location || prev.location,
           narrative: response.narrative,
-          inventory: sanitizeInventory(response.inventory),
+          inventory: sanitizeInventory(response.inventory || prev.inventory),
           availableExits: response.availableExits || [],
           visualDescription: response.visualPrompt,
           imageUrl: newImageUrl,
