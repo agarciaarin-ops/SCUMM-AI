@@ -6,8 +6,8 @@ const API_KEY = process.env.API_KEY || '';
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 // HYBRID ARCHITECTURE CONFIGURATION
-const MODEL_INIT = "gemini-3-pro-preview"; // "Big Brain" for world creation
-const MODEL_LOOP = "gemini-2.5-flash";     // "Fast Brain" for gameplay actions
+const MODEL_INIT = "gemini-3.1-flash-lite-preview"; // "Fast Brain" for world creation (Free tier)
+const MODEL_LOOP = "gemini-3.1-flash-lite-preview"; // "Fast Brain" for gameplay actions (Free tier)
 const MODEL_IMAGE = "gemini-2.5-flash-image"; // "Visual Cortex" - STRICTLY NANO BANANA
 
 // Helper to strip data:image prefix
@@ -143,16 +143,15 @@ export const generateInitialGameWorld = async (settings: GameSettings): Promise<
     Return ONLY the JSON object.
   `;
 
-  // FALLBACK LOGIC: Try Big Brain (Pro), if fail, use Fast Brain (Flash)
+  // FALLBACK LOGIC: Try Flash Lite, if fail, retry with Flash Lite
   try {
-      console.log("Initializing with Gemini 3 Pro...");
+      console.log("Initializing with Gemini 3.1 Flash Lite...");
       const response = await callWithRetry(() => ai.models.generateContent({
         model: MODEL_INIT,
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: {
           responseMimeType: "application/json",
           responseSchema: gameSchema,
-          // No thinking config to ensure speed/stability
           maxOutputTokens: 8192, 
         },
       }));
@@ -160,14 +159,14 @@ export const generateInitialGameWorld = async (settings: GameSettings): Promise<
       const jsonText = cleanJsonOutput(response.text || "{}");
       const parsed = tryParseJSON(jsonText);
       
-      if (!parsed || !parsed.narrative) throw new Error("Invalid JSON from Pro");
+      if (!parsed || !parsed.narrative) throw new Error("Invalid JSON from Flash Lite");
       
-      return { ...parsed, modelUsed: "Gemini 3.0 Pro" };
+      return { ...parsed, modelUsed: "Gemini 3.1 Flash Lite" };
 
   } catch (error) {
-      console.warn("Gemini 3 Pro Initialization failed, falling back to Flash...", error);
+      console.warn("Gemini 3.1 Flash Lite Initialization failed, retrying...", error);
       
-      // FALLBACK: Gemini 2.5 Flash
+      // FALLBACK: Gemini 3.1 Flash Lite
       const response = await callWithRetry(() => ai.models.generateContent({
         model: MODEL_LOOP, // Use Flash for fallback
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -179,7 +178,7 @@ export const generateInitialGameWorld = async (settings: GameSettings): Promise<
 
       const jsonText = cleanJsonOutput(response.text || "{}");
       const parsed = tryParseJSON(jsonText);
-      return { ...parsed, modelUsed: "Gemini 2.5 Flash (Fallback)" };
+      return { ...parsed, modelUsed: "Gemini 3.1 Flash Lite (Retry)" };
   }
 };
 
@@ -266,9 +265,9 @@ export const generateSceneImage = async (
   const safePrompt = sanitizeVisualPrompt(visualPrompt);
 
   // 3. Construct the Final Prompt
-  // STRICTLY NANO BANANA COMPATIBLE PROMPT
+  // STRICTLY NANO BANANA COMPATIBLE PROMPT with Retro Styling
   const finalPrompt = `
-    ${style} pixel art adventure game screenshot. 
+    ${style} retro pixel art adventure game screenshot. 320x200 resolution aesthetic.
     Scene: ${safePrompt}. 
     Visible Elements: ${cleanElements}.
     NO text, NO UI, NO labels, NO speech bubbles.

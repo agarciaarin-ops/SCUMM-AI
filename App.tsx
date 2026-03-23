@@ -137,7 +137,7 @@ export default function App() {
     if (!inputLocation || !inputStyle) return;
     
     setIsInitializing(true);
-    setInitStatus("CONECTANDO CON GEMINI 3 PRO...");
+    setInitStatus("CONECTANDO CON GEMINI 3.1 FLASH LITE...");
     
     const newSettings: GameSettings = {
         world: inputWorld,
@@ -448,8 +448,8 @@ export default function App() {
       </div>
       
       <footer className="mt-4 text-gray-600 text-sm text-center">
-        World Gen: <span className={gameState.modelUsed?.includes("Pro") ? "text-green-500" : "text-yellow-500"}>{gameState.modelUsed || "Initializing..."}</span> <br/>
-        Powered by Gemini 3.0 Pro (Brain) & Gemini 2.5 Flash (Speed) & Nano Banana (Vision) <br/> 
+        World Gen: <span className={gameState.modelUsed?.includes("Flash") ? "text-green-500" : "text-yellow-500"}>{gameState.modelUsed || "Initializing..."}</span> <br/>
+        Powered by Gemini 3.1 Flash Lite (Brain & Speed) & Nano Banana (Vision) <br/> 
         World: {gameState.settings.world}
       </footer>
     </div>
